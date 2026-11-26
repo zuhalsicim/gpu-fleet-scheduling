@@ -1,0 +1,18 @@
+[project]
+name = "gpu-fleet-scheduling"
+version = "1.0.0"
+description = "How much faster do jobs finish on a mixed GPU fleet when the scheduler knows which GPU type suits which job?"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["data", "dashboard"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]

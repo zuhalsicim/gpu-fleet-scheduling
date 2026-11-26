@@ -1,0 +1,13 @@
+# How many times faster a V100 trains than a T4, per model family.
+# Source: R. Xu, F. Han, Q. Ta, "Deep Learning Performance on T4 GPUs with MLPerf Benchmarks", Dell EMC,
+# March 2019 (Dell knowledge base article 000132094): MLPerf Training v0.5 on one server,
+# V100-PCIe against T4. Where the article gives a range, the midpoint is used. Families without a matching
+# benchmark get the geometric mean of the article's overall range (2.2x to 3.6x).
+family,v100_over_t4,basis
+ResNet-18,3.6,MLPerf ResNet-50 v1.5 (3.6x)
+ResNet-50,3.6,MLPerf ResNet-50 v1.5 (3.6x)
+Transformer,2.7,MLPerf Transformer (2.6x to 2.8x)
+LM,3.05,MLPerf GNMT recurrent translation (2.5x to 3.6x)
+CycleGAN,2.81,no matching benchmark: geometric mean of 2.2x and 3.6x
+A3C,2.81,no matching benchmark: geometric mean of 2.2x and 3.6x
+Recommendation,2.81,no matching benchmark (NCF result not given): geometric mean of 2.2x and 3.6x

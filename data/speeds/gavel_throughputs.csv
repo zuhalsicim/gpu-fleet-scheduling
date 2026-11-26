@@ -1,0 +1,30 @@
+# Source: Gavel (Narayanan et al., OSDI 2020), https://raw.githubusercontent.com/stanford-futuredata/gavel/c2bc4b8f218e369e4e17ab86e216753997545d5b/scheduler/simulation_throughputs.json
+# Copyright (c) 2020 Stanford Future Data Systems, MIT licence (see data/speeds/README.md).
+# Isolated single-GPU training throughput (iterations per second) per job type and GPU type.
+job_type,family,k80,p100,v100
+A3C,A3C,3.438768,5.681346,7.175767
+CycleGAN,CycleGAN,0.504771,2.402668,4.426088
+LM (batch size 10),LM,23.794429,77.084678,81.651635
+LM (batch size 20),LM,17.142290,58.172672,64.742451
+LM (batch size 40),LM,11.499652,35.766383,45.237372
+LM (batch size 5),LM,25.485501,90.775912,109.166618
+LM (batch size 80),LM,6.054204,21.157528,28.239955
+Recommendation (batch size 1024),Recommendation,20.049953,30.744437,13.282570
+Recommendation (batch size 2048),Recommendation,10.441220,16.596640,7.469632
+Recommendation (batch size 4096),Recommendation,5.300247,8.896662,3.906051
+Recommendation (batch size 512),Recommendation,32.859303,48.882391,23.317635
+Recommendation (batch size 8192),Recommendation,2.698783,5.548441,2.841510
+ResNet-18 (batch size 128),ResNet-18,1.806530,11.675500,17.994906
+ResNet-18 (batch size 16),ResNet-18,4.795295,35.869203,32.353384
+ResNet-18 (batch size 256),ResNet-18,0.885580,7.722785,10.300257
+ResNet-18 (batch size 32),ResNet-18,7.175821,35.825354,29.947157
+ResNet-18 (batch size 64),ResNet-18,7.052081,22.304944,24.093232
+ResNet-50 (batch size 128),ResNet-50,0.347224,1.584352,2.496766
+ResNet-50 (batch size 16),ResNet-50,2.300520,9.052990,11.396129
+ResNet-50 (batch size 32),ResNet-50,1.236569,4.888324,7.787265
+ResNet-50 (batch size 64),ResNet-50,0.619028,2.619469,4.394775
+Transformer (batch size 128),Transformer,0.981583,3.073535,5.446105
+Transformer (batch size 16),Transformer,5.467379,9.537249,11.064087
+Transformer (batch size 256),Transformer,0.458331,1.677696,1.595141
+Transformer (batch size 32),Transformer,3.507419,7.869223,10.620893
+Transformer (batch size 64),Transformer,1.752227,5.091831,8.617759
