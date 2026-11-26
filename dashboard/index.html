@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet replay</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6; --series-2: #eb6834;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5; --series-2: #d95926;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5; --series-2: #d95926;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { color: var(--ink-2); margin: 0 0 16px; max-width: 75ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: end; margin-bottom: 16px; }
+  label { display: grid; gap: 4px; color: var(--ink-2); font-size: 12px; }
+  select, button, input[type=range] { font: inherit; color: var(--ink); }
+  select, button { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; min-width: 84px; }
+  .slider { flex: 1 1 260px; }
+  .slider input { width: 100%; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 2px; }
+  .card .sub { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+  .key { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; border-radius: 1px; }
+  .grid5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .tick { fill: var(--muted); font-size: 10px; }
+  .now { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-2); font-weight: 600; font-size: 12px; }
+  #tip { position: fixed; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+         padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12); display: none; font-variant-numeric: tabular-nums; }
+  .error { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fleet replay</h1>
+  <p class="lead">Two days of the Alibaba PAI GPU trace (seed 0), replayed by the simulator under two policies at once.
+    Queue length for the whole cluster, and the share of each GPU type's capacity in use, sampled every 10 minutes.
+    Press play to move the cursor through time; hover a chart to read exact values.</p>
+
+  <div class="controls">
+    <label>Fleet size<select id="fleet"></select></label>
+    <label>Policy A<select id="polA"></select></label>
+    <label>Policy B<select id="polB"></select></label>
+    <button id="play" type="button">Play</button>
+    <label class="slider">Time <span class="now" id="nowLabel"></span><input id="cursor" type="range" min="0" value="0"></label>
+  </div>
+
+  <div class="card">
+    <h2>Jobs waiting</h2>
+    <p class="sub">Whole cluster. A type-aware policy that waits for fast GPUs can hold a queue while slow GPUs sit idle.</p>
+    <div class="legend" id="legend1"></div>
+    <div id="queueChart"></div>
+  </div>
+
+  <div class="card">
+    <h2>GPU capacity in use, per type</h2>
+    <p class="sub">Share of each type's capacity (fractional requests count as fractions). Types from slowest to fastest on average.</p>
+    <div class="legend" id="legend2"></div>
+    <div class="grid5" id="typeCharts"></div>
+  </div>
+
+  <div class="card">
+    <h2>At the cursor</h2>
+    <table id="readout"></table>
+  </div>
+  <p class="sub" id="source"></p>
+</main>
+<div id="tip"></div>
+
+<script>
+const TYPES = ["MISC", "T4", "P100", "V100", "V100M32"];
+const state = { data: null, fleet: null, a: null, b: null, cursor: 0, timer: null };
+const $ = (id) => document.getElementById(id);
+
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function hours(i) { return (i * state.data.every / 3600); }
+function fmtTime(i) { const h = hours(i); const d = Math.floor(h / 24); return `day ${d + 1}, ${String(Math.floor(h % 24)).padStart(2, "0")}:${String(Math.round((h % 1) * 60)).padStart(2, "0")}`; }
+function run(policy) { return state.data.runs.find(r => r.policy === policy && r.fleet_scale === state.fleet); }
+
+function lineChart(el, seriesA, seriesB, { height = 160, yMax = null, pct = false } = {}) {
+  const w = Math.max(240, el.clientWidth || 600), h = height, m = { l: 40, r: 8, t: 8, b: 20 };
+  const n = seriesA.length;
+  const max = yMax ?? Math.max(1, ...seriesA, ...seriesB) * 1.1;
+  const x = i => m.l + (w - m.l - m.r) * i / (n - 1);
+  const y = v => h - m.b - (h - m.t - m.b) * v / max;
+  const path = s => s.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  const ticks = [0, max / 2, max].map(v => `<line x1="${m.l}" x2="${w - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>
+     <text class="tick" x="${m.l - 6}" y="${y(v) + 3}" text-anchor="end">${pct ? Math.round(v * 100) + "%" : Math.round(v)}</text>`).join("");
+  const days = []; for (let i = 0; i < n; i++) if (i % Math.round(86400 / state.data.every) === 0) days.push(i);
+  const xt = days.map(i => `<text class="tick" x="${x(i)}" y="${h - 4}" text-anchor="middle">day ${Math.round(hours(i) / 24) + 1}</text>`).join("");
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" data-w="${w}" role="img">
+    ${ticks}${xt}
+    <line x1="${m.l}" x2="${w - m.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--axis)"/>
+    <path d="${path(seriesA)}" fill="none" stroke="var(--series-1)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <path d="${path(seriesB)}" fill="none" stroke="var(--series-2)" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+    <line class="cursor" x1="${x(state.cursor)}" x2="${x(state.cursor)}" y1="${m.t}" y2="${h - m.b}" stroke="var(--ink-2)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <rect x="${m.l}" y="0" width="${w - m.l - m.r}" height="${h}" fill="transparent"/>
+  </svg>`;
+  const svg = el.querySelector("svg");
+  svg.addEventListener("mousemove", ev => {
+    const box = svg.getBoundingClientRect();
+    const px = (ev.clientX - box.left) / box.width * w;
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - m.l) / (w - m.l - m.r) * (n - 1))));
+    const f = v => pct ? (v * 100).toFixed(1) + "%" : v;
+    const tip = $("tip");
+    tip.innerHTML = `<div>${fmtTime(i)}</div><div><span class="key" style="background:var(--series-1)"></span>${state.a}: ${f(seriesA[i])}</div>
+      <div><span class="key" style="background:var(--series-2)"></span>${state.b}: ${f(seriesB[i])}</div>`;
+    tip.style.display = "block"; tip.style.left = (ev.clientX + 12) + "px"; tip.style.top = (ev.clientY + 12) + "px";
+  });
+  svg.addEventListener("mouseleave", () => { $("tip").style.display = "none"; });
+  svg.addEventListener("click", ev => {
+    const box = svg.getBoundingClientRect();
+    const px = (ev.clientX - box.left) / box.width * w;
+    setCursor(Math.round((px - m.l) / (w - m.l - m.r) * (n - 1)));
+  });
+}
+
+function legend(el) {
+  el.innerHTML = `<span><span class="key" style="background:var(--series-1)"></span>A: ${state.a}</span>
+                  <span><span class="key" style="background:var(--series-2)"></span>B: ${state.b}</span>`;
+}
+
+function draw() {
+  const A = run(state.a), B = run(state.b);
+  if (!A || !B) return;
+  legend($("legend1")); legend($("legend2"));
+  lineChart($("queueChart"), A.queued, B.queued);
+  const box = $("typeCharts"); box.innerHTML = "";
+  for (const t of TYPES) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `<div class="sub" style="margin:0 0 4px"><strong style="color:var(--ink)">${t}</strong> · ${A.gpus[t].toLocaleString()} GPUs</div><div></div>`;
+    box.appendChild(wrap);
+    lineChart(wrap.lastChild, A.used[t], B.used[t], { height: 150, yMax: 1, pct: true });
+  }
+  readout();
+}
+
+function readout() {
+  const A = run(state.a), B = run(state.b), i = state.cursor;
+  $("nowLabel").textContent = fmtTime(i);
+  const rows = [["Jobs waiting", A.queued[i], B.queued[i]], ["Waiting although enough capacity is free, but scattered", A.blocked[i], B.blocked[i]]];
+  for (const t of TYPES) rows.push([`${t}: capacity in use`, (A.used[t][i] * 100).toFixed(0) + "%", (B.used[t][i] * 100).toFixed(0) + "%"]);
+  for (const t of TYPES) rows.push([`${t}: jobs running`, A.running[t][i], B.running[t][i]]);
+  $("readout").innerHTML = `<tr><th></th><th>A: ${state.a}</th><th>B: ${state.b}</th></tr>` +
+    rows.map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+  document.querySelectorAll("line.cursor").forEach(l => {
+    const w = Number(l.ownerSVGElement.dataset.w), m = { l: 40, r: 8 }, n = A.queued.length;
+    const x = m.l + (w - m.l - m.r) * i / (n - 1);
+    l.setAttribute("x1", x); l.setAttribute("x2", x);
+  });
+}
+
+function setCursor(i) {
+  const n = run(state.a).queued.length;
+  state.cursor = Math.max(0, Math.min(n - 1, i));
+  $("cursor").value = state.cursor;
+  readout();
+}
+
+function options(select, values, chosen, label = v => v) {
+  select.innerHTML = values.map(v => `<option value="${v}" ${v === chosen ? "selected" : ""}>${label(v)}</option>`).join("");
+}
+
+function setup() {
+  const fleets = [...new Set(state.data.runs.map(r => r.fleet_scale))];
+  state.fleet = fleets[0];
+  options($("fleet"), fleets, state.fleet, v => v === 1 ? "as in the trace (100%)" : `${Math.round(v * 100)}% of the GPUs`);
+  const policies = [...new Set(state.data.runs.map(r => r.policy))];
+  state.a = policies.includes("blind-backfill") ? "blind-backfill" : policies[0];
+  state.b = policies.includes("aware-greedy") ? "aware-greedy" : policies[1] ?? policies[0];
+  options($("polA"), policies, state.a); options($("polB"), policies, state.b);
+  $("cursor").max = run(state.a).queued.length - 1;
+  $("fleet").onchange = e => { state.fleet = Number(e.target.value); draw(); };
+  $("polA").onchange = e => { state.a = e.target.value; draw(); };
+  $("polB").onchange = e => { state.b = e.target.value; draw(); };
+  $("cursor").oninput = e => setCursor(Number(e.target.value));
+  $("play").onclick = () => {
+    if (state.timer) { clearInterval(state.timer); state.timer = null; $("play").textContent = "Play"; return; }
+    $("play").textContent = "Pause";
+    state.timer = setInterval(() => {
+      const n = run(state.a).queued.length;
+      setCursor(state.cursor + 1 >= n ? 0 : state.cursor + 1);
+    }, 80);
+  };
+  $("source").textContent = "Data: results/timeline.json, written by python -m fleetsim.experiments. Trace: Alibaba cluster-trace-gpu-v2020 (CC BY 4.0).";
+  let resize = null;
+  window.addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(draw, 150); });
+  draw();
+}
+
+fetch("../results/timeline.json")
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => { state.data = d; setup(); })
+  .catch(() => { document.querySelector("main").insertAdjacentHTML("beforeend",
+    `<p class="error">Could not load ../results/timeline.json. Serve the repository root, e.g. <code>python -m http.server</code>, and open /dashboard/.</p>`); });
+</script>
+</body>
+</html>
